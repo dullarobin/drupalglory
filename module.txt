@@ -1,0 +1,606 @@
+<?php
+
+
+/**
+ * Implements hook_menu()
+ */
+function remove_developer_from_company_menu() {
+ // Menu item for removing developer/user from specific company.
+  $items['remove/developer/%/%/%ctools_js'] = array(
+    'title'           => 'Remove User',
+    'page callback'   => 'remove_dev_from_company',
+	'page arguments'   => array(2,3,4),
+	// 'access callback' => TRUE,
+      'access callback'  => 'remove_developer_access_has_role',
+      'access arguments' =>  array('administrator', 'Telstra Wholesale Administrator', 'Customer admin'),
+    'type'            => MENU_CALLBACK
+  );
+
+  $items['remove/multiple/%/%ctools_js'] = array(
+    'title'            => 'Remove User',
+    'page callback'    => 'multiple_confirm_popup',
+    'page arguments'   => array( 2, 3 ),
+    // 'access callback' => TRUE,
+    'access callback'  => 'remove_developer_access_has_role',
+    'access arguments' => array(
+      'administrator',
+      'Telstra Wholesale Administrator',
+      'Customer admin'
+    ),
+    'type'             => MENU_CALLBACK
+  );
+
+  $items['remove/batch/multiple'] = array(
+    'title'            => 'Remove User',
+    'page callback'    => 'remove_multiple_batch',
+    // 'access callback' => TRUE,
+    'access callback'  => 'remove_developer_access_has_role',
+    'access arguments' => array(
+      'administrator',
+      'Telstra Wholesale Administrator',
+      'Customer admin'
+    ),
+    'type'             => MENU_CALLBACK
+  );
+
+  return $items;
+}
+
+
+function remove_dev_from_company($dev_uid, $comp_id, $ajax) {
+$form_id = 'remove_developer_fc_confirm_delete_form';
+  if ($ajax) {
+    ctools_include('ajax');
+    ctools_include('modal');
+	ctools_modal_add_js();
+	
+    $form_state               = array(
+      'ajax'  => TRUE,
+      'title' => t('Remove User'),
+    );
+    $form_state['user_id'] = array(
+      '#value' => $dev_uid,
+    );
+	
+    $form_state['comp_id'] = array(
+      '#value' => $comp_id,
+    );
+
+    // Use ctools to generate ajax instructions for the browser to create a form in a modal popup.
+    $output = ctools_modal_form_wrapper('remove_developer_fc_confirm_delete_form', $form_state);
+
+    // If the form has been submitted, there may be additional instructions
+    // such as dismissing the modal popup.
+    if ( ! empty($form_state['ajax_commands'])) {
+      $output = $form_state['ajax_commands'];
+    }
+    // Return the ajax instructions to the browser via ajax_render().
+    print ajax_render($output);
+    drupal_exit();
+  }
+  else {
+    return drupal_get_form('remove_developer_fc_confirm_delete_form');
+  }
+
+}
+
+function remove_developer_fc_confirm_delete_form($form, &$form_state) {	
+  $user_id = $form_state['user_id']['#value'];
+  $comp_id = $form_state['comp_id']['#value'];
+  $company = entity_load_single('apigee_company', $comp_id);
+  $user_email = user_load($user_id);	
+ // $dev_customer_list = remove_developer_get_customers($user_email->mail);
+ // $array = explode(',', $dev_customer_list);
+//  $developer_customer_count = count($array);
+  /*if($developer_customer_count == 1){
+	  $msg_confirm = 'Do you want to remove the user? This user added to the only customer '. $company->displayName . '.';
+  }
+  else {*/
+	  $msg_confirm = 'Do you want to remove the user from customer ' . $company->displayName. '?';
+ // }
+  
+  $form = array();
+
+  $form['remove_dev'] = array(
+    '#markup' => t($msg_confirm),
+    '#prefix' => "<div class = 'delete_conf'>",
+    '#suffix' => "</div><div class='loader-bg'><div class='telstra-loading-spinner-1'></div></div>",
+  );
+
+  $form['user_uid'] = array(
+    '#type'          => 'hidden',
+    '#default_value' => $form_state['user_id']['#value'],
+
+  );
+  
+  $form['comp_mid'] = array(
+    '#type'          => 'hidden',
+    '#default_value' => $form_state['comp_id']['#value'],
+
+  );
+  
+  $form['submit']  = array(
+    '#type'  => 'submit',
+    '#value' => t('Remove'),
+	'#attributes' => array(
+      'class' => array(
+        'remove-dev-sub'
+      )
+    )
+
+  );
+
+  $form['cancel'] = array(
+    '#type'       => 'button',
+    '#value'      => t('Cancel'),
+    '#attributes' => array(
+      'class' => array(
+        'ctools-close-modal'
+      )
+    )
+  );
+
+  // watchdog('Removed Developer form_state', "<pre>".print_r($form_state,true)."</pre>");
+
+  return $form;
+}
+
+
+function remove_developer_fc_confirm_delete_form_submit(&$form, &$form_state) {
+  global $user;
+  $dev_uid = $form_state['values']['user_uid'];	
+  $comp_mid = $form_state['values']['comp_mid'];
+  $u_email = user_load($dev_uid);
+  $user_email = $u_email->mail;
+  $config = devconnect_default_org_config();
+  $comp_obj = new Company($config);
+  $dev_role = $comp_obj->getDeveloperRoles($user_email, $comp_mid, $reset = false);
+  if(isset($dev_role)) {
+  $removed_dev_role = $dev_role[0];
+  }
+  if(isset($user_email) && isset($comp_mid) && !empty($user_email) && !empty($comp_mid)) {
+	  
+	/* Remove developer start*/  
+	$remove_dev = $comp_obj->removeDeveloper($user_email, $comp_mid);
+	/* End */
+		  
+	/** Saving removed developer data in our custom table **/
+	$nid = db_insert('remove_developer_logging')
+	  ->fields(array(
+		'uid'       => $dev_uid,
+		'email'    => $user_email,
+		'customer_name' => $comp_mid,
+		'role' => $removed_dev_role, 
+		'who_removed_the_dev' => $user->mail,
+	  ))
+	  ->execute();
+	  
+	/*Below query to get specific user latest session time*/
+    $time_active = db_query("SELECT timestamp FROM {sessions} WHERE uid = :uid ORDER BY timestamp DESC LIMIT 1", array(":uid" => $dev_uid))->fetchField();
+	/*END*/
+	
+	/*For user force logout */  
+    if(module_exists('logout_developer') && isset($time_active) && $time_active != '') {	
+		db_merge('logout_developer')
+			->insertFields(array(
+			  'uid'           => $dev_uid,
+			  'status'        => 1,
+
+			))
+			->updateFields(array(
+			  'uid'           => $dev_uid,
+			  'status'        => 1,
+			))
+			->key(array( 'uid' => $dev_uid ))
+			->execute();    
+	}
+	  $dev_customer_list = remove_developer_get_customers($user_email);
+	  $array = explode(' ', $dev_customer_list);
+	  $developer_customer_count = count($array);
+	  $u_email->field_user_customers['und'][0]['value'] = $dev_customer_list;
+	  $u_email->field_user_customers['und'][0]['value']  = $dev_customer_list;
+	  user_save($u_email);
+	  $params = drupal_get_query_parameters();
+	  $redirect_url = url('/tw_company/developer/invite/' . $dev_uid , array());
+	  $form_state['ajax_commands'][] = ctools_modal_command_dismiss();
+      $form_state['ajax_commands'][] = ctools_ajax_command_redirect($redirect_url, 0, array('query'=> array('mode'=> $_GET['mode'])));
+	  $company = entity_load_single('apigee_company', $comp_mid);
+	  drupal_set_message(t('Developer ' .drupal_ucfirst($u_email->field_first_name['und'][0]['value']) .' '.drupal_ucfirst($u_email->field_last_name['und'][0]['value']).' has been removed from the company ' .$company->displayName));
+	  drupal_flush_all_caches(); 
+   }
+
+}
+
+/*
+ * Access Callback for invite user page.
+ */
+function remove_developer_access_has_role() {
+  global $user;
+  $roles = func_get_args();
+  foreach ($roles as $role) {
+    if (in_array($role, $user->roles)) {
+      return TRUE;
+    }
+  }
+
+  return FALSE;
+}
+
+
+function remove_developer_get_customers($email) {
+  	$config = devconnect_default_org_config();
+	$dev = new Company($config);
+	if(!empty($dev)) {
+		$list_comp = $dev->getDeveloperCompanies($email);
+		$cDname = array();
+		foreach ($list_comp as $comp)
+		{
+			$name = $dev->load($comp);
+	        $dName = $dev->toArray();
+			$cDname[] = $dName['displayName'];
+		}
+		$list = implode(',', $cDname);
+				return $list;
+	}
+	return false;	
+}
+
+
+/**
+ * Gives table of customer and there role
+ * under the form of modify account and 
+ * manage user edit form
+ * mcu-manage customer and user
+ */
+function remove_developer_list_mcu($form, &$form_state) {
+  global $user;
+  $args       = arg();
+  $invitee_id = NULL;
+  $options    = array();
+
+  if (isset($args[3]) && ! is_numeric($args[3])) {
+    $url_params = urldecode(arg(3));
+    if ( ! empty($url_params)) {
+      $url_params = explode('?', $url_params);
+      if (isset($url_params[1])) {
+        $mode_array = explode('=', $url_params[1]);
+        $invitee_id = isset($url_params[0]) ? $url_params[0] : NULL;
+        $url        = isset($mode_array[1]) ? $mode_array[1] : NULL;
+      }
+    }
+  }
+
+  if ( ! empty($invitee_id) && is_numeric($invitee_id)) {
+    $user_email = user_load($invitee_id);
+  }
+  else {
+    $uid = arg(3);
+    if ( ! empty($uid) && is_numeric($uid)) {
+      $user_email = user_load($uid);
+      $url        = $_GET['mode'];
+    }
+  }
+
+  $dev           = entity_load_single('developer', $user_email->mail);
+  $config        = devconnect_default_org_config();
+  $dev_companies = isset($dev->companies) ? $dev->companies : NULL;
+
+  $cmp_obj = new Company($config);
+// Get list of all the companies
+  $rows           = [];
+  $company_list   = $cmp_obj->listCompaniesDetail();
+  $table_array    = [];
+  $dev1           = entity_load_single('developer', $user->mail);
+  $dev1_companies = isset($dev->companies) ? $dev->companies : NULL;
+  if (in_array('Telstra Wholesale Administrator', $user->roles)) {
+    $cValue = $dev_companies;
+  }
+  else {
+    $cValue = array_intersect($dev1->companies, $dev->companies);
+  }
+  ctools_include('modal');
+  ctools_modal_add_js();
+
+  foreach ($cValue as $comp) {
+    $company = entity_load_single('apigee_company', $comp);
+// $company_name = '<a href="/api_company/company/switch/'.$comp.'?destination=api_company/company/developers">'.$company->displayName.'</a>';
+    $company_name = $company->displayName;
+    foreach ($company->developers as $role => $dev_val) {
+      if (in_array($role, array(
+        'Customer admin',
+        'Customer app developer - Live',
+        'Customer app developer - Test'
+      ))) {
+        foreach ($dev_val as $devs) {
+          if ($devs == $user_email->mail) {
+            $role_name = $role;
+          }
+          else {
+            continue;
+          }
+        }
+      }
+      else {
+        continue;
+      }
+    }
+    $remove_developer = l(t('Remove User'), 'remove/developer/' . $user_email->uid . '/' . $comp . '/nojs', array(
+      'attributes' => array(
+        'class' => array(
+          'ctools-use-modal',
+          'ctools-modal-company-role-modal-style',
+          'secondary-btn',
+          'btn-default',
+          'modify-role-btn',
+          'btn',
+          'remove-devv'
+        ),
+      ),
+      'query'      => array( 'mode' => $url )
+    ));
+
+    $options[$comp] = array(
+      'company' => $company->displayName,
+      'role'    => $role_name,
+//      'action' => array(
+//        'data' => $remove_developer,
+//      ),
+    );
+  }
+
+  $header     = array(
+    'company' => t('Customer'),
+    'role'    => t('Role'),
+//    'action' => array(
+//      'data' => t('Action'),
+//    ),
+  );
+  $attributes = array(
+    'class' => array( 'apigee-company-tables', 'developers-company-list' ),
+  );
+
+  $form['table'] = array
+  (
+    '#type'    => 'tableselect',
+    '#header'  => $header,
+    '#options' => $options,
+    '#empty'   => t('There are no customers on this list yet.'),
+  );
+
+  if(isset($_GET['mode'])) {
+    $form['mode'] = array(
+      '#type' => 'hidden',
+      '#value' => $_GET['mode']
+    );
+  }
+
+  $form['submit'] = array
+  (
+    '#type'  => 'submit',
+    '#disabled' => true,
+    '#value' => t('Remove from selected customers'),
+    '#ajax'  => array(
+//      'callback' => 'multiple_confirm_popup',
+      'path' => '/remove/multiple/' . arg(3) . '/nojs'
+    ),
+  );
+
+  return $form;
+}
+
+function multiple_confirm_popup($uid, $ajax) {
+  $args = arg();
+  if ($ajax) {
+    ctools_include('ajax');
+    ctools_include('modal');
+    ctools_modal_add_js();
+    ctools_add_js('ajax-responder');
+    $form_state = array(
+      'ajax'  => TRUE,
+      'title' => t('Remove User Multiple'),
+    );
+
+    $form_state['customer_list'] = isset($_POST['table']) ? $_POST['table'] : '';
+    $form_state['uid']           = $uid;
+    $form_state['mode'] = isset($_POST['mode']) ? $_POST['mode'] : '';
+    // Use ctools to generate ajax instructions for the browser to create a form in a modal popup.
+    $output = ctools_modal_form_wrapper('multiple_delete_confirm_popup', $form_state);
+
+    // If the form has been submitted, there may be additional instructions
+    // such as dismissing the modal popup.
+    if ( ! empty($form_state['ajax_commands'])) {
+      $output = $form_state['ajax_commands'];
+    }
+    // Return the ajax instructions to the browser via ajax_render().
+    print ajax_render($output);
+    drupal_exit();
+  }
+  else {
+    return drupal_get_form('multiple_delete_confirm_popup');
+  }
+}
+
+function multiple_delete_confirm_popup($form, &$form_state) {
+  $form                 = array();
+  $form['remove_dev_c'] = array(
+    '#markup' => isset($form_state['values']['table']) ? $form_state['values']['table'] : '',
+    '#prefix' => "<div class = 'delete_conf'>",
+    '#suffix' => "</div><div class='loader-bg'><div class='telstra-loading-spinner-1'></div></div>",
+  );
+
+  $selected_checkboxes = isset($form_state['customer_list']) ? $form_state['customer_list'] : '';
+  if ( ! empty($selected_checkboxes)) {
+    $list_customers = '<div>Do you want to remove the user from selected customers ?</div><ul>';
+    $checks         = [];
+    $config         = devconnect_default_org_config();
+    foreach ($selected_checkboxes as $checkbox_key => $checkbox_val) {
+      if ($checkbox_val !== 0) {
+        $company_obj    = new Company($config);
+        $comp           = $company_obj->load($checkbox_val);
+        $comp           = $company_obj->toArray();
+        $list_customers .= '<li>' . $comp["displayName"] . '</li>';
+        $checks[]       = $checkbox_val;
+      }
+    }
+    $list_customers               .= '</ul>';
+    $form['customer_list_markup'] = array(
+      '#markup' => $list_customers,
+    );
+
+    $check_implode                     = base64_encode(implode(',', $checks));
+    $form['customer_list_selected_ag'] = array(
+      '#value' => $check_implode,
+      '#type'  => 'hidden'
+    );
+    $form['mode'] = array(
+      '#value' => isset($form_state['mode']) ? $form_state['mode'] : '',
+      '#type'  => 'hidden'
+    );
+  }
+  $form['submit'] = array(
+    '#type'       => 'submit',
+    '#value'      => t('Remove'),
+    '#attributes' => array(
+      'class' => array(
+        'remove-dev-subNA'
+      )
+    )
+  );
+
+  $form['cancel'] = array(
+    '#type'       => 'button',
+    '#value'      => t('Cancel'),
+    '#attributes' => array(
+      'class' => array(
+        'ctools-close-modal'
+      )
+    )
+  );
+
+  return $form;
+}
+
+function multiple_delete_confirm_popup_submit($form, &$form_state) {
+  // Getting from input key as customer_list_selected_ag not available in $form_state['values'].
+  $cus                              = explode(',', base64_decode($form_state['input']['customer_list_selected_ag']));
+  $uid                              = $form_state['uid'];
+  $_SESSION['process_batch_delete'] = array(
+    'uid'      => $uid,
+    'customers' => $cus,
+    'mode' => $form_state['mode']
+  );
+  $redirect_url                     = url('/tw_company/developer/invite/' . $uid, array());
+//  $form_state['redirect']        = 'remove/batch/multiple';
+  $form_state['ajax_commands'][] = ctools_modal_command_dismiss();
+  $form_state['ajax_commands'][] = ctools_ajax_command_redirect('/remove/batch/multiple');
+//  drupal_set_message('User removed successfully from selected customers.', 'status');
+//  $form_state['ajax_commands'][] = ctools_modal_command_dismiss();
+//  $form_state['ajax_commands'][] = ctools_ajax_command_redirect('http://google.com', 0, array('query'=> array('mode'=> $_GET['mode'])));
+//  drupal_set_message('User removed successfully from selected customers.', 'status');
+}
+
+function remove_multiple_batch() {
+  if(!(isset($_SESSION['process_batch_delete'])) || empty($_SESSION['process_batch_delete'])) {
+    drupal_set_message('Something went wrong, Please try again later', 'error');
+    drupal_goto('/manage/users');
+    return TRUE;
+  }
+  $process_batch = $_SESSION['process_batch_delete'];
+  unset($_SESSION['process_batch_delete']);
+  $config = devconnect_default_org_config();
+  $batch = array(
+    'operations'       => array(),
+    'finished'         => 'remove_multiple_batch_finished',
+    'title'            => t('Removing'),
+    'init_message'     => t('Removing'),
+    'progress_message' => t('Removed @current out of @total.'),
+    'error_message'    => t('Encountered an error while removing the user.')
+  );
+  foreach ($process_batch['customers'] as $result) {
+    $batch['operations'][] = array(
+      'remove_multiple_batch_process',
+      array($result, $process_batch['uid'], $config)
+    );
+  }
+  batch_set($batch);
+  batch_process('/tw_company/developer/invite/'.$process_batch['uid'].'?mode='.$process_batch['mode']); // The path to redirect to when done.
+}
+
+function remove_multiple_batch_process($comp_mid, $dev_uid, $config, &$context) {
+  global $user;
+  // Display a progress message...
+  $context['message'] = "Now removing from $comp_mid...";
+
+  $u_email = user_load($dev_uid);
+  $user_email = $u_email->mail;
+
+  $comp_obj = new Company($config);
+  $dev_role = $comp_obj->getDeveloperRoles($user_email, $comp_mid, $reset = false);
+  if(isset($dev_role)) {
+    $removed_dev_role = $dev_role[0];
+  }
+  if(isset($user_email) && isset($comp_mid) && !empty($user_email) && !empty($comp_mid)) {
+
+    /* Remove developer start*/
+    $remove_dev = $comp_obj->removeDeveloper($user_email, $comp_mid);
+    /* End */
+
+    /** Saving removed developer data in our custom table **/
+    $nid = db_insert('remove_developer_logging')
+      ->fields(array(
+        'uid'       => $dev_uid,
+        'email'    => $user_email,
+        'customer_name' => $comp_mid,
+        'role' => $removed_dev_role,
+        'who_removed_the_dev' => $user->mail,
+      ))
+      ->execute();
+
+    /*Below query to get specific user latest session time*/
+    $time_active = db_query("SELECT timestamp FROM {sessions} WHERE uid = :uid ORDER BY timestamp DESC LIMIT 1", array(":uid" => $dev_uid))->fetchField();
+    /*END*/
+
+    /*For user force logout */
+    if(module_exists('logout_developer') && isset($time_active) && $time_active != '') {
+      db_merge('logout_developer')
+        ->insertFields(array(
+          'uid'           => $dev_uid,
+          'status'        => 1,
+
+        ))
+        ->updateFields(array(
+          'uid'           => $dev_uid,
+          'status'        => 1,
+        ))
+        ->key(array( 'uid' => $dev_uid ))
+        ->execute();
+    }
+    $dev_customer_list = remove_developer_get_customers($user_email);
+    $array = explode(' ', $dev_customer_list);
+    $developer_customer_count = count($array);
+    $u_email->field_user_customers['und'][0]['value'] = $dev_customer_list;
+    user_save($u_email);
+    $params = drupal_get_query_parameters();
+    $redirect_url = url('/tw_company/developer/invite/' . $dev_uid , array());
+    $company = entity_load_single('apigee_company', $comp_mid);
+    drupal_set_message(t('Developer ' .drupal_ucfirst($u_email->field_first_name['und'][0]['value']) .' '.drupal_ucfirst($u_email->field_last_name['und'][0]['value']).' has been removed from the company ' .$company->displayName));
+  }
+}
+
+/**
+ * The batch finish handler.
+ */
+function remove_multiple_batch_finished($success, $results, $operations) {
+  if ($success) {
+    drupal_set_message('User has been removed successfully from selected customers.');
+    drupal_flush_all_caches();
+  }
+  else {
+    $error_operation = reset($operations);
+    $message         = t('An error occurred while processing %error_operation with arguments: @arguments', array(
+      '%error_operation' => $error_operation[0],
+      '@arguments'       => print_r($error_operation[1], TRUE)
+    ));
+    drupal_set_message($message, 'error');
+  }
+}
