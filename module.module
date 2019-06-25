@@ -1,0 +1,915 @@
+<?php
+
+/**
+ * Implements hook_menu().
+ */
+function module_menu() {
+  $items['publish-redoc'] = array(
+    'page callback'    => 'module_publish_redoc',
+    'access callback'  => true,
+/*     'access callback'  => 'cloudsmartz_user_has_role',
+    'access arguments' => array( array( 'Content Manager' ) ), */
+    'type'             => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+/*
+Access Function to check if user is valid to call the service
+@author Satbir Singh
+*/
+function cloudsmartz_user_has_role($roles) {
+  global $user;
+  $allowed_ip = variable_get('allowed_ip_address_list');
+  $allowed_ip     = str_replace(' ', '', $allowed_ip);
+  $allowed_ip_arr = explode(',', $allowed_ip);
+  watchdog("Content API", "Remote ADD is " . $_SERVER['REMOTE_ADDR'] . " and x-forwaded is " . $_SERVER['REMOTE_ADDR']);
+  if (in_array($_SERVER['REMOTE_ADDR'], $allowed_ip_arr)) {
+    if (user_is_logged_in()) {
+      if (in_array('administrator', $user->roles)) {
+        return TRUE;
+      }
+      else {
+        foreach ($roles as $role) {
+          if (in_array($role, $user->roles)) {
+            return TRUE;
+          }
+        }
+      }
+    }
+  }
+  else {
+    cloudsmartz_generate_error("You are not authorised. Please contact your Dev portal admin.");
+  }
+  cloudsmartz_generate_error("You are not authorised. Please contact your Dev portal admin.");
+  return FALSE;
+}
+
+/**
+ * Custom function for return error message in Content API call.
+ * @author Satbir Singh
+ */
+function cloudsmartz_generate_error($errormsg) {
+  echo json_encode(array( 'status' => 'error', 'error-msg' => $errormsg ));
+  die;
+}
+
+function get_string_between($string, $start, $end) {
+  $string = ' ' . $string;
+  $ini    = strpos($string, $start);
+  if ($ini == 0) {
+    return '';
+  }
+  $ini += strlen($start);
+  $len = strpos($string, $end, $ini) - $ini;
+
+  return substr($string, $ini, $len);
+}
+
+
+/**
+ * Implements hook_node_insert().
+ */
+function module_node_insert($node) {
+	if($node->type == 'api_landing') { 
+	  $query = db_select('node', 'n');
+	  $query->join('field_data_field_api_version', 'fap', 'fap.entity_id = n.nid');
+	  $query->condition('n.type', 'api_landing');
+	  $query->condition('fap.field_api_version_value', $node->field_api_version['und'][0]['value']);
+	  $query->orderBy('n.nid', 'DESC');
+	  $query->fields('n', array( 'nid', 'vid', 'title', 'type' ));
+	  $query->fields('fap', array(
+		'entity_id',
+		'field_api_version_value',
+		'revision_id'
+	  ));
+	  $result = $query->execute()->fetchObject();
+	  
+	  /** This code for updating field_check_latest_version*/
+	  $nodes = node_load_multiple(array(), array( 'title' => $node->title));
+		foreach ($nodes as $products) {
+		  $node = node_load($products->nid);
+		  $node->field_check_latest_version['und'][0]['value'] = 'no'; ;
+		  node_save($node);
+		}
+		$node = 	node_load($result->entity_id);
+		$node->field_check_latest_version['und'][0]['value'] = 'yes'; 
+		node_save($node);
+	}
+}
+
+/**
+ * Custom function for publish API in Content API call.
+ * @author Satbir Singh
+ */
+function module_publish_redoc() { 
+  global $base_url;
+  global $user;
+  $postmanHeaderData = array('Content-Type' => $_SERVER['CONTENT_TYPE'], 'ENVIRONMENT' => $_SERVER['HTTP_ENVIRONMENT'],'ACCEPT' => $_SERVER['HTTP_ACCEPT'],'USERNAME' => $_SERVER['HTTP_USERNAME']);
+  watchdog("SQSLOG", print_r($postmanHeaderData, true), array(), $severity = WATCHDOG_INFO);
+  watchdog("SQSLOG", print_r($_REQUEST, true), array(), $severity = WATCHDOG_INFO);
+  if(!isset($_FILES['apiRedoc']) || empty($_FILES['apiRedoc'])) {
+	cloudsmartz_generate_error("API Redoc file should not be empty.");
+	return FALSE;
+  }
+  
+  if(!isset($_POST['apiName']) || empty($_POST['apiName'])) {
+	cloudsmartz_generate_error("API Name should not be empty.");
+	return FALSE;
+  }
+
+  if(!isset($_POST['apiVisiblity']) || empty($_POST['apiVisiblity'])) {
+	cloudsmartz_generate_error("API visiblity should not be empty.");
+	return FALSE;
+  }
+  
+  if($_POST['apiVisiblity'] != 'Telstra Wholesale User' && $_POST['apiVisiblity'] != 'Telstra Internal User') {
+	cloudsmartz_generate_error("Api visiblity should be either 'Telstra Wholesale User' or 'Telstra Internal User'.");
+	return FALSE;
+  }
+  
+  if(!isset($_POST['apiVersion']) || empty($_POST['apiVersion'])) {
+	cloudsmartz_generate_error("API version should not be empty.");
+	return FALSE;
+  }
+  
+  if(!isset($_POST['apiAuthor']) || empty($_POST['apiAuthor'])) {
+	cloudsmartz_generate_error("API Author should not be empty.");
+	return FALSE;
+  }
+  
+  $_POST['apiName'] = rtrim($_POST['apiName'], "\n");
+ // drupal_add_http_header('Content-Type', 'application/json');
+  drupal_add_http_header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  $current_timestamp = time();
+  $dir               = 'public://redocs';
+  $mydir             = 'public://redocs/' . $current_timestamp;
+  if ( ! file_prepare_directory($mydir, FILE_CREATE_DIRECTORY)) {
+    cloudsmartz_generate_error("Unable to prepare directory, please try again");
+  }
+
+  if ( ! isset($_FILES['apiRedoc']) || empty($_FILES['apiRedoc'])) {
+    cloudsmartz_generate_error("apiRedoc is missing");
+  }
+
+  if ( ! drupal_move_uploaded_file($_FILES['apiRedoc']['tmp_name'], $mydir . '/' . $_FILES['apiRedoc']['name'])) {
+    cloudsmartz_generate_error("Unable to upload JSON file.");
+  }
+
+  $allowed  = array( 'json', 'yaml' );
+  $filename = $_FILES['apiRedoc']['name'];
+  $ext      = pathinfo($filename, PATHINFO_EXTENSION);
+
+  $type_allowed = array( 'application/json', 'text/yaml' );
+  $filetype     = $_FILES['apiRedoc']['type'];
+
+  if ( ! in_array($ext, $allowed)) {
+    if ( ! in_array($filetype, $type_allowed)) {
+      cloudsmartz_generate_error("Only json and yaml files are allowed");
+    }
+  }
+  
+/*File Validation starts here*/
+  $check_arr         = array();
+  $fileNames = array('apiFile', 'apiFile2', 'apiFile3', 'apiFile4', 'apiFile5');
+  $ext1 = array('pdf', 'xlsx');
+  $fileValue = array();
+  foreach($_FILES as $key => $value) {
+		if(in_array($key, $fileNames)) {  
+		  $fnPost = $key;
+		  $fName = $value['name'];
+		  $fType = $value['type'];
+		  $fSize = $value['size'];
+		  $ftmpName = $value['tmp_name'];
+		  //$ext1 = explode('.', $_FILES[$fnPost]['name']);
+			  if (isset($_FILES[$fnPost]) && ! empty($_FILES[$fnPost])) {
+				  $ext = explode('.', $_FILES[$fnPost]['name']);
+				  if (!in_array($ext[1], $ext1)) {
+					  cloudsmartz_generate_error("Only pdf/excel file is allowed.");
+					}
+					if ((filesize($_FILES[$fnPost]['tmp_name']) > 2097152) || ($_FILES[$fnPost]['tmp_name'] == '')) {
+						cloudsmartz_generate_error("Filesize shouldn't exceed 2MB.");
+					}
+				}
+				if ( ! drupal_move_uploaded_file($_FILES[$fnPost]['tmp_name'], $mydir . '/' . $_FILES[$fnPost]['name'])) {
+				  cloudsmartz_generate_error("Unable to upload file.");
+				}
+		}
+			$fileValue[] = $value;
+    }
+/*File Validation END here*/
+
+  if ( ! empty($_POST['apiAuthor'])) {
+    $apiAuthor = trim($_POST['apiAuthor']);
+    if (valid_email_address($apiAuthor)) {
+      $api_user = user_load_by_mail($apiAuthor);
+      if ($api_user === FALSE) {
+        cloudsmartz_generate_error("Your API author is not registered with Devportal. Please contact devportal support.");
+      }
+      else {
+        if((isset($api_user->status) && $api_user->status!=1 ) || !in_array('Telstra Internal User', $api_user->roles)) {
+          cloudsmartz_generate_error("User is blocked and not authorized. Please contact devportal support team.");
+        }
+      }
+    }
+    else {
+      cloudsmartz_generate_error("Please use valid email address.");
+    }
+  }
+  else {
+    cloudsmartz_generate_error("Missing apiAuthor parameter.");
+  }
+  $_POST['apiName'] = rtrim($_POST['apiName'], "\n");
+
+  if ( ! isset($_POST['apiVersion']) || strpos($_POST['apiVersion'], '.') == FALSE) {
+    cloudsmartz_generate_error("apiVersion cannot be Empty or use float value!!");
+  }
+
+  if (isset($_POST['apiName']) && $_POST['apiName'] != '') {
+    $node_id = db_select('node', 'n');
+    $node_id->join('field_data_field_api_version', 'fap', 'fap.entity_id = n.nid');
+    $node_id->condition('n.type', 'api_landing');
+    $node_id->condition('n.title', $_POST['apiName']);
+    $node_id->condition('fap.field_api_version_value', $_POST['apiVersion']);
+    //$node_id->orderBy('n.nid', 'DESC');
+    $node_id->fields('n', array( 'nid', 'vid', 'type', 'title', 'uid' ));
+    $node_id->fields('fap', array(
+      'entity_id',
+      'field_api_version_value',
+      'revision_id'
+    ));
+    $node_id = $node_id->execute()->fetchObject();
+	
+	$_POST['apiVisiblity'] = trim($_POST['apiVisiblity']);
+	if(isset($node_id->entity_id) && !empty($node_id->entity_id)) {
+		$node_nid    = $node_id->entity_id;
+		$node_title  = $node_id->title;
+		$node_author = $node_id->uid;
+		$node_auther_load = user_load($node_author);
+		$node_versionn = $node_id->field_api_version_value;
+		$query = db_select('node', 'n');
+		$query->join('field_data_field_api_version', 'fap', 'fap.entity_id = n.nid');
+		$query->condition('n.type', 'api_landing');
+		$query->condition('n.title', $_POST['apiName']);
+		$query->orderBy('n.nid', 'DESC');
+		$query->fields('n', array( 'nid', 'vid', 'title', 'type' ));
+		$query->fields('fap', array(
+		  'entity_id',
+		  'field_api_version_value',
+		  'revision_id'
+		));
+		$result = $query->execute()->fetchObject();
+		$eRevision = array();
+		$query1    = db_select('field_data_field_api_version', 'fv');
+		$query1->fields('fv', array( 'field_api_version_value' ));
+		$rExits = $query1->execute()->fetchCol();
+		foreach ($rExits as $eRecord) {
+		  $eRevision[] = $eRecord;
+		}
+		$check_version = in_array($_POST['apiVersion'], $eRevision);
+		$node_version1 = strval($node_versionn);
+		$postVersion   = strval($_POST['apiVersion']);
+		$node_f        = strcasecmp($node_version1, $postVersion);
+		$ext = strcasecmp($node_title, trim($_POST['apiName']));
+		//cloudsmartz_generate_error($ext .'----'.$node_auther_load->mail.'----'.$node_f.'----'.$check_version.'----'. $node_nid);
+		if ($ext == 0 && $node_auther_load->mail == $api_user->mail && $node_f == 0 || $check_version == TRUE) {
+			//cloudsmartz_generate_error($ext .'----'.$node_auther_load->mail.'----'.$node_f.'----'.$check_version.'----'. );
+		  module_update_publish_redoc($node_nid);
+		}
+		elseif ($ext == 0 && $node_auther_load->mail != $api_user->mail) {
+		  cloudsmartz_generate_error("You are not author of this API and API Name already exists. Please use different name to continue.");
+		}
+	}
+  }
+
+  $file_name      = $_FILES['apiRedoc']['name'];
+  $file           = new stdClass;
+  $file->uid      = 1;
+  $file->uri      = $mydir . '/' . $_FILES['apiRedoc']['name'];
+  $file->filemime = $_FILES['apiRedoc']['type'];
+  $file->status   = 1;
+  $file           = file_copy($file, $mydir . '/' . $file_name);
+  $tmp_file       = file_save($file);
+  if (empty($tmp_file)) {
+    cloudsmartz_generate_error("There is some issue in creating Redoc File. ");
+  }
+
+  $file_arr = array(
+    'fid'      => $tmp_file->fid,
+    'filename' => $_FILES['apiRedoc']['name'],
+    'url'      => $mydir . '/' . $_FILES['apiRedoc']['name'],
+    'display'  => 1
+  );
+  //$apiType = 'private';
+  if ( ! isset($_POST['apiName'])) {
+    cloudsmartz_generate_error("Missing apiName parameter");
+  }
+  if (isset($_POST['apiVisiblity'])) {
+    $apiVisiblity = $_POST['apiVisiblity'];
+  }
+  if ( ! isset($_POST['apiName']) || trim($_POST['apiName']) == "") {
+    cloudsmartz_generate_error("apiName cannot be Empty!!");
+  }
+
+  // Thumbnail code start //
+  if ( ! empty($_FILES["Thumbnail"] && isset($_FILES["Thumbnail"]))) {
+
+    if ( ! drupal_move_uploaded_file($_FILES['Thumbnail']['tmp_name'], 'public://' . '/' . $_FILES['Thumbnail']['name'])) {
+      cloudsmartz_generate_error("Unable to upload Thumbnail file.");
+    }
+
+    $image     = $_FILES["Thumbnail"]["name"];
+	$imagedir       = 'public://';
+	$img_path = $imagedir . '/' . $_FILES['Thumbnail']['name'];
+	if(getimagesize($img_path) === false){
+		cloudsmartz_generate_error("Thumbnail seems corrupted.Please upload a valid file.");
+    }
+    $path_info = pathinfo($image);
+
+    if ($path_info['extension'] == 'jpg' || $path_info['extension'] == 'jpeg' || $path_info['extension'] == 'png' || $path_info['extension'] == 'gif') {
+
+      $file_name      = $_FILES['Thumbnail']['name'];
+      $file           = new stdClass;
+      $file->uid      = 1;
+      $file->uri      = $imagedir . '/' . $_FILES['Thumbnail']['name'];
+      $file->filemime = $_FILES['Thumbnail']['type'];
+      $file->status   = 1;
+      $file           = file_copy($file, $imagedir . '/' . $file_name);
+
+      $tmp_file = file_save($file);
+
+      if (empty($tmp_file)) {
+        cloudsmartz_generate_error("There is some issue in creating Redoc File. ");
+      }
+
+      $imgthumb_arr = array(
+        'fid'      => $tmp_file->fid,
+        'filename' => $_FILES['Thumbnail']['name'],
+        'url'      => $imagedir . '/' . $_FILES['Thumbnail']['name'],
+        'display'  => 1
+      );
+    }
+    else {
+      cloudsmartz_generate_error("Only images file is allowed");
+    }
+  }
+  // Thumbnail code end //
+  
+  $thumb_url = $base_url . '/sites/default/files/' . $imgthumb_arr['filename'];
+  global $user;
+  /***********************************************/
+  $path       = $mydir;
+  chmod($mydir, 0777);
+ // $files      = scandir($path, SCANDIR_SORT_DESCENDING);
+  $path_to_dir = "sites/default/files/".file_uri_target($mydir);
+  $filesJson = file_scan_directory($path_to_dir, '/.*\.json$/');
+  $file_urll   = file_create_url($file_arr['url']);
+  $fJson = array();
+  	foreach($filesJson as $key => $fj) {
+		$fJson[] = $fj->uri;
+	}
+  $file_url   = $fJson[0];
+  $file_url_0 = $fJson[1];
+  
+  $change_mode  = chmod($file_url, 0777);
+  $change_mode1 = chmod($file_url_0, 0777);
+  
+  $str1 = file_get_contents($file_url);
+  $str2 = file_get_contents($file_url_0);
+
+  $json1 = json_decode($str1, TRUE);
+  $json2 = json_decode($str2, TRUE);
+
+/*   $ar[1] = $_POST['apiName'];
+  $ar[2] = $json1['info']['title'];
+  $ar[3] = $json2['info']['title'];
+watchdog('ssf', '<prE>' . print_r($ar, true) . '</pre>'); */
+
+  if ($_POST['apiName'] !== $json1['info']['title'] && $_POST['apiName'] !== $json2['info']['title']) {
+    cloudsmartz_generate_error('API name should be same as mentioned in json file.');
+  }
+  if (strval(trim($_POST['apiVersion'])) !== strval(trim($json1['info']['version'])) && strval(trim($_POST['apiVersion'])) !== strval(trim($json2['info']['version']))) {
+    cloudsmartz_generate_error('API version should be same as mentioned in json file.');
+  }
+  $apiName = trim($_POST['apiName']);
+  $apiVisiblity    = trim($_POST['apiVisiblity']);
+  $apiVisiblity    = isset($_POST['apiVisiblity']) && trim($_POST['apiVisiblity']) != "" ? trim($_POST['apiVisiblity']) : 'Telstra Internal User';
+  $apiVersion = $_POST['apiVersion'];
+
+  switch ($apiVisiblity) {
+    case 'Telstra Wholesale User':
+      $allowed_roles = array(
+	    "anonymous user",
+        "Telstra Wholesale User",
+        "Administrator",
+        "Telstra Wholesale Administrator"
+      );
+      break;
+    case 'Telstra Internal User':
+	  $allowed_roles = array(
+        "Telstra Internal User",
+        "Administrator",
+        "Telstra Wholesale Administrator"
+      );
+	  break;
+    default:
+      $allowed_roles = array(
+        "Telstra Internal User",
+        "Administrator",
+        "Telstra Wholesale Administrator"
+      );
+      break;
+  }
+
+  /*Image append code start here*/
+  if (isset($_FILES["Thumbnail"])) {
+    $img    = '<img class= "api_img_position" src="' . $thumb_url . '" alt="' . $apiName . '">';
+	$len = strlen($json1['info']['description']); 
+    $intro1 = substr('x-logo', 0, $len);
+	$len1 = strlen($json2['info']['description']); 
+    $intro2 = substr('x-logo', 0, $len1);
+
+    $kya  = str_replace($intro1, $img, $json1['info']['description']);
+    $kya2 = str_replace($intro1, $img, $json2['info']['description']);
+
+    $json1['info']['description'] = $kya;
+    $json2['info']['description'] = $kya2;
+    $jsonData = json_encode($json1);
+    file_put_contents($file_url, $jsonData);
+    $jsonData2 = json_encode($json2);
+    file_put_contents($file_url_0, $jsonData2);
+  }
+  elseif(! isset($_FILES["Thumbnail"])) {
+	$len = strlen($json1['info']['description']); 
+    $intro1 = substr('x-logo', 0, $len);
+	$len1 = strlen($json2['info']['description']); 
+    $intro2 = substr('x-logo', 0, $len1);  
+
+    $kya  = str_replace($intro1, ' ', $json1['info']['description']);
+    $kya2 = str_replace($intro2, ' ', $json2['info']['description']);
+
+    $json1['info']['description'] = $kya;
+    $json2['info']['description'] = $kya2;
+    $jsonData                     = json_encode($json1);
+    file_put_contents($file_url, $jsonData);
+
+    $jsonData2 = json_encode($json2);
+    file_put_contents($file_url_0, $jsonData2);
+  }
+  /*END*/
+
+  /*ZIP code token replacement from here*/
+ if (isset($_FILES['apiFile']) && ! empty($_FILES['apiFile'])) {
+
+    $path_to_dir = "sites/default/files/".file_uri_target($mydir);
+    $filesPdf = file_scan_directory($path_to_dir, '/.*\.pdf$/');
+	$filesExcel = file_scan_directory($path_to_dir, '/.*\.xlsx$/');
+		//cloudsmartz_generate_error($filesPdf);
+	$file = array();
+	$files_name = array();
+	foreach($filesPdf as $key => $fp) {
+		$fpdf = $base_url .'/'. $fp->uri;
+		$files_name[] =  $fp->filename;
+		$file[] = "<p><a class= 'btn' href='".$fpdf."' target= '_blank' download>Download</a></p>";
+	}
+	$fxls = array();
+	foreach($filesExcel as $key => $fe) {
+		$fxls[$key] = $base_url .'/'. $fe->uri;
+		$files_name[] = $fe->filename;
+		$file[] = "<p><a class= 'btn' href='".$fxls[$key]."' target= '_blank' download>Download</a></p>";
+	}
+	
+  /*Files append code start here*/
+    $result = array();
+    foreach ($json1['tags'] as $res) {
+      $name = $res['name'];
+      if ($name == 'Supporting materials') {
+        $result[] = $res['description'];
+      }
+
+    }
+	
+	$fResult = null;
+	foreach ($files_name as $key => $value) {
+			$fResult = str_replace($value, $file[$key], $result[0]);
+			$result[0] = $fResult;
+	}
+
+    foreach ($json1['tags'] as $key => $res1) {
+      $name = $res1['name'];
+      if ($name == 'Supporting materials') {
+          $json1['tags'][$key]['description'] = $fResult;
+		 
+          $jsonData = json_encode($json1);
+          file_put_contents($file_url, $jsonData);
+
+          $jsonData2 = json_encode($json1);
+          file_put_contents($file_url_0, $jsonData2);
+        }
+    }
+ }
+  $title      = $apiName;
+  $url_alias  = 'content/' . drupal_html_class(drupal_clean_css_identifier($apiName . '-' . $apiVersion));
+  $node       = new stdClass();
+  $node->type = 'api_landing';
+  $stat       = 'created';
+  node_object_prepare($node);
+  $node->title = $title;
+  $node->language = LANGUAGE_NONE; // Or e.g. 'en' if locale is enabled
+  $node->uid      = $api_user->uid;
+  $node->status   = 1; //(1 or 0): published or not
+  $node->promote  = 0; //(1 or 0): promoted to front pagex
+  $node->comment  = 0; // 0 = comments disabled, 1 = read only, 2 = read/write
+
+  $str  = file_get_contents($file_url);
+  $json = json_decode($str, TRUE); // decode the JSON into an associative array
+
+  if (isset($json['info']['description'])) {
+    $intro  = explode('<p>', $json['info']['description']);
+    $text   = strip_tags($json['info']['description']);
+    $parsed = get_string_between($text, '#', '#');
+    $string = trim(preg_replace('/\s+/', ' ', $parsed));
+    $subtr  = substr($string, 12);
+    // Entity reference field
+    $node->field_api_landing_content['und']['0']['value']  = $subtr;
+    $node->field_api_landing_content['und']['0']['format'] = 'full_html';
+  }
+  $node->field_api_version['und'][0]['value'] = $apiVersion;
+  //Adding Access level to Node
+  if ( ! empty($allowed_roles)) {
+    if (count($allowed_roles) > 1) {
+      for ($i = 0; $i < count($allowed_roles); $i++) {
+        $node->field_allowed_role['und'][$i]['value'] = $allowed_roles[$i];
+		$rrroles[] = $allowed_roles[$i]; 
+      }
+    }
+    else {
+      $node->field_allowed_role['und'][$i]['value'] = $allowed_roles[$i];
+    }
+  }
+  if ( ! empty($_FILES["Thumbnail"] && isset($_FILES["Thumbnail"]))) {
+    $node->field_thumbnail['und'][0] = $imgthumb_arr;
+  }
+  $node->field_swagger_json['und'][0] = $file_arr;
+  // 'node' is default,
+  // Other possible values are "user" and  "taxonomy_term"
+  if ($url_alias != '') {
+    $node->path['alias']    = trim($url_alias);
+    $node->path['pathauto'] = FALSE;
+  }
+  $node->field_check_latest_version['und'][0]['value'] = 'yes';
+  $node                                                = node_submit($node); // Prepare node for saving
+  node_save($node);
+  echo json_encode(array(
+    'status' => 'success',
+    'nid'    => $node->nid,
+    'url'    => $base_url . '/content/' . drupal_html_class(drupal_clean_css_identifier($apiName . '-' . $apiVersion))
+  ));
+  die;
+}
+
+/**
+ * Custom function for update API in Content API call.
+ * @author Satbir Singh
+ */
+function module_update_publish_redoc($node_nid) {
+  global $base_url;
+  drupal_add_http_header('Content-Type', 'application/json');
+  if (empty($node_nid)) {
+    return;
+  }
+  $current_timestamp = time();
+  $dir               = 'public://redocs';
+  $mydir             = 'public://redocs/' . $current_timestamp;
+  if ( ! file_prepare_directory($mydir, FILE_CREATE_DIRECTORY)) {
+    cloudsmartz_generate_error("Unable to upload ZIP Archive");
+  }
+
+  if ( ! isset($_FILES['apiRedoc']) || empty($_FILES['apiRedoc'])) {
+    cloudsmartz_generate_error("apiRedoc is missing");
+  }
+
+  if ( ! drupal_move_uploaded_file($_FILES['apiRedoc']['tmp_name'], $mydir . '/' . $_FILES['apiRedoc']['name'])) {
+    //cloudsmartz_generate_error("Unable to upload JSON file.");
+  }
+
+  $allowed  = array( 'json', 'yaml' );
+  $filename = $_FILES['apiRedoc']['name'];
+  $ext      = pathinfo($filename, PATHINFO_EXTENSION);
+  $type_allowed = array( 'application/json', 'text/yaml' );
+  $filetype     = $_FILES['apiRedoc']['type'];
+
+  if ( ! in_array($ext, $allowed)) {
+    if ( ! in_array($filetype, $type_allowed)) {
+      cloudsmartz_generate_error("Only json and yaml files are allowed");
+    }
+  }
+
+// Thumbnail code start //
+  if ( ! empty($_FILES["Thumbnail"] && isset($_FILES["Thumbnail"]))) {
+
+    if ( ! drupal_move_uploaded_file($_FILES['Thumbnail']['tmp_name'], 'public://' . '/' . $_FILES['Thumbnail']['name'])) {
+      cloudsmartz_generate_error("Unable to upload Thumbnail file.");
+    }
+
+    $image     = $_FILES["Thumbnail"]["name"];
+	$imagedir       = 'public://';
+	$img_path = $imagedir . '/' . $_FILES['Thumbnail']['name'];
+	if(getimagesize($img_path) === false){
+		cloudsmartz_generate_error("Thumbnail seems corrupted.Please upload a valid file.");
+    }
+    $path_info = pathinfo($image);
+    if ($path_info['extension'] == 'jpg' || $path_info['extension'] == 'jpeg' || $path_info['extension'] == 'png' || $path_info['extension'] == 'gif') {
+
+
+      $file_name      = $_FILES['Thumbnail']['name'];
+      $file           = new stdClass;
+      $file->uid      = 1;
+      $file->uri      = $imagedir . '/' . $_FILES['Thumbnail']['name'];
+      $file->filemime = $_FILES['Thumbnail']['type'];
+      $file->status   = 1;
+      $file           = file_copy($file, $imagedir . '/' . $file_name);
+
+      $tmp_file = file_save($file);
+
+      if (empty($tmp_file)) {
+          cloudsmartz_generate_error("There is some issue in creating Redoc File. ");
+       }
+
+      $imgthumb_arr = array(
+        'fid'      => $tmp_file->fid,
+        'filename' => $_FILES['Thumbnail']['name'],
+        'url'      => $imagedir . '/' . $_FILES['Thumbnail']['name'],
+        'display'  => 1
+      );
+
+    }
+    else {
+      cloudsmartz_generate_error("Only images file is allowed");
+    }
+  }
+  // Thumbnail code end //
+
+  $file_name      = $_FILES['apiRedoc']['name'];
+  $file           = new stdClass;
+  $file->uid      = 1;
+  $file->uri      = $mydir . '/' . $_FILES['apiRedoc']['name'];
+  $file->filemime = $_FILES['apiRedoc']['type'];
+  $file->status = 1;
+  $file = file_copy($file, $mydir . '/' . $file_name);
+  $tmp_file = file_save($file);
+  if (empty($tmp_file)) {
+    cloudsmartz_generate_error("There is some issue in creating Redoc File. ");
+  }
+
+  $file_arr = array(
+    'fid'      => $tmp_file->fid,
+    'filename' => $_FILES['apiRedoc']['name'],
+    'url'      => $mydir . '/' . $_FILES['apiRedoc']['name'],
+    'display'  => 1
+  );
+
+  global $user;
+  if ( ! isset($_POST['apiName'])) {
+    cloudsmartz_generate_error("Missing apiName parameter");
+  }
+  if (isset($_POST['apiVisiblity'])) {
+    $apiVisiblity = $_POST['apiVisiblity'];
+  }
+  if ( ! isset($_POST['apiName']) || trim($_POST['apiName']) == "") {
+    cloudsmartz_generate_error("apiName cannot be Empty!!");
+  }
+
+  if ( ! isset($_POST['apiVersion']) || strpos($_POST['apiVersion'], '.') == FALSE) {
+    cloudsmartz_generate_error("apiVersion cannot be Empty or use float value!!");
+  }
+
+  global $user;
+  $apiName    = trim($_POST['apiName']);
+  $apiVisiblity    = trim($_POST['apiVisiblity']);
+  $apiVisiblity    = isset($_POST['apiVisiblity']) && trim($_POST['apiVisiblity']) != "" ? trim($_POST['apiVisiblity']) : 'Telstra Internal User';
+  $apiVersion = $_POST['apiVersion'];
+  switch ($apiVisiblity) {
+    case 'Telstra Wholesale User':
+      $allowed_roles = array(
+	    "anonymous user",
+        "Telstra Wholesale User",
+        "Administrator",
+        "Telstra Wholesale Administrator"
+      );
+      break;
+    case 'Telstra Internal User':
+    default:
+      $allowed_roles = array(
+        "Telstra Internal User",
+        "Administrator",
+        "Telstra Wholesale Administrator"
+      );
+      break;
+  }
+
+  /**
+   * Code to make image field dynamic
+   */
+  $thumb_url = $base_url . '/sites/default/files/' . $imgthumb_arr['filename'];
+  $path       = $mydir;
+  chmod($mydir, 0777);
+  $path_to_dir = "sites/default/files/".file_uri_target($mydir);
+  $filesJson = file_scan_directory($path_to_dir, '/.*\.json$/');
+  $fJson = array();
+  	foreach($filesJson as $key => $fj) {
+		$fJson[] = $fj->uri;
+	}
+  $file_url   = $fJson[0];
+  $file_url_0 = $fJson[1];
+
+  $change_mode  = chmod($file_url, 0777);
+  $change_mode1 = chmod($file_url_0, 0777);
+
+  $str1 = file_get_contents($file_url);
+  $str2 = file_get_contents($file_url_0);
+
+  $json1 = json_decode($str1, TRUE);
+  $json2 = json_decode($str2, TRUE);
+  
+  /*if ($_POST['apiName'] !== $json1['info']['title'] && $_POST['apiName'] !== $json2['info']['title']) {
+    cloudsmartz_generate_error('API name should be same as mentioned in json file.');
+  }*/
+  /*if (strval(trim($_POST['apiVersion'])) !== strval(trim($json1['info']['version'])) && strval(trim($_POST['apiVersion'])) !== strval(trim($json2['info']['version']))) {
+    cloudsmartz_generate_error('API version should be same as mentioned in json file.');
+  }*/  
+
+  if ( ! empty($_FILES["Thumbnail"]) && isset($_FILES["Thumbnail"])) {
+    $img    = '<img class= "api_img_position" src="' . $thumb_url . '" alt="' . $apiName . '">';
+	$len = strlen($json1['info']['description']); 
+    $intro1 = substr('x-logo', 0, $len);
+	$len1 = strlen($json2['info']['description']); 
+    $intro2 = substr('x-logo', 0, $len);
+    $kya  = str_replace($intro1, $img, $json1['info']['description']);
+    $kya2 = str_replace($intro2, $img, $json2['info']['description']);
+    $json1['info']['description'] = $kya;
+    $json2['info']['description'] = $kya2;
+    $jsonData = json_encode($json1);
+    $abc = file_put_contents($file_url, $jsonData);
+    $jsonData2 = json_encode($json2);
+    file_put_contents($file_url_0, $jsonData2);
+  }
+  else {
+	$len = strlen($json1['info']['description']); 
+    $intro1 = substr('x-logo', 0, $len);
+	$len1 = strlen($json2['info']['description']); 
+    $intro2 = substr('x-logo', 0, $len);
+    $kya  = str_replace($intro1, ' ', $json1['info']['description']);
+    $kya2 = str_replace($intro2, ' ', $json2['info']['description']);
+
+    $json1['info']['description'] = $kya;
+    $json2['info']['description'] = $kya2;
+
+    $jsonData = json_encode($json1);
+    file_put_contents($file_url, $jsonData);
+
+    $jsonData2 = json_encode($json2);
+    file_put_contents($file_url_0, $jsonData2);
+  }
+/****Dynamic image end*****/
+
+/*ZIP code token replacement from here*/
+  if (isset($_FILES['apiFile']) && ! empty($_FILES['apiFile'])) {
+
+    $path_to_dir = "sites/default/files/".file_uri_target($mydir);
+    $filesPdf = file_scan_directory($path_to_dir, '/.*\.pdf$/');
+	$filesExcel = file_scan_directory($path_to_dir, '/.*\.xlsx$/');
+		//cloudsmartz_generate_error($filesPdf);
+	$file = array();
+	$files_name = array();
+	foreach($filesPdf as $key => $fp) {
+		$fpdf = $base_url .'/'. $fp->uri;
+		$files_name[] =  $fp->filename;
+		$file[] = "<p><a class= 'btn' href='".$fpdf."' target= '_blank' download>Download</a></p>";
+	}
+	$fxls = array();
+	foreach($filesExcel as $key => $fe) {
+		$fxls[$key] = $base_url .'/'. $fe->uri;
+		$files_name[] = $fe->filename;
+		$file[] = "<p><a class= 'btn' href='".$fxls[$key]."' target= '_blank' download>Download</a></p>";
+	}
+	
+  /*Files append code start here*/
+    $result = array();
+	$file_string = array();
+    foreach ($json1['tags'] as $res) {
+      $name = $res['name'];
+      if ($name == 'Supporting materials') {
+        $result[] = $res['description'];
+      }
+
+    }
+	$fResult = null;
+	foreach ($files_name as $key => $value) {
+			$fResult = str_replace($value, $file[$key], $result[0]);
+			$result[0] = $fResult;
+	}
+
+    foreach ($json1['tags'] as $key => $res1) {
+      $name = $res1['name'];
+      if ($name == 'Supporting materials') {
+          $json1['tags'][$key]['description'] = $fResult;
+		 
+          $jsonData = json_encode($json1);
+          file_put_contents($file_url, $jsonData);
+
+          $jsonData2 = json_encode($json1);
+          file_put_contents($file_url_0, $jsonData2);
+        }
+
+    }
+ }
+ /** END**/
+ 
+  $title     = $apiName;
+  $url_alias = 'content/' . drupal_html_class(drupal_clean_css_identifier($apiName . '-' . $apiVersion));
+  //$node = new stdClass();
+  $node = node_load($node_nid);
+  //cloudsmartz_generate_error($node);
+  $node->type = 'api_landing';
+  $stat       = 'created';
+  node_object_prepare($node);
+  $node->title = $title;
+  // Sets some defaults. Invokes hook_prepare() and hook_node_prepare().
+  $node->language = LANGUAGE_NONE; // Or e.g. 'en' if locale is enabled
+  $node->uid      = $user->uid;
+  $node->status   = 1; //(1 or 0): published or not
+  $node->promote  = 0; //(1 or 0): promoted to front pagex
+  $node->comment  = 0; // 0 = comments disabled, 1 = read only, 2 = read/write
+
+  $file_url = file_create_url($file_arr['url']);
+  $str      = file_get_contents($file_url);
+  $json     = json_decode($str, TRUE); // decode the JSON into an associative array
+
+  if (isset($json['info']['description'])) {
+
+    $intro  = explode('<p>', $json['info']['description']);
+    $text   = strip_tags($json['info']['description']);
+    $parsed = get_string_between($text, '#', '#');
+    $string = trim(preg_replace('/\s+/', ' ', $parsed));
+    $subtr  = substr($string, 12);
+    // Entity reference field
+    $node->field_api_landing_content['und']['0']['value']  = $subtr;
+    $node->field_api_landing_content['und']['0']['format'] = 'full_html';
+  }
+
+  //Adding Access level to Node
+  if ( ! empty($allowed_roles)) {
+    if (count($allowed_roles) > 1) {
+      //foreach($allowed_roles as $allowed_role){
+      for ($i = 0; $i < count($allowed_roles); $i++) {
+        $node->field_allowed_role['und'][$i]['value'] = $allowed_roles[$i];
+      }
+    }
+    else {
+      $node->field_allowed_role['und'][$i]['value'] = $allowed_roles[$i];
+    }
+  }
+
+  if ( ! empty($_FILES["Thumbnail"] && isset($_FILES["Thumbnail"]))) {
+    $node->field_thumbnail['und'][0] = $imgthumb_arr;
+  }
+  $node->field_api_version['und'][0]['value'] = $apiVersion;
+  //$node->field_thumbnail['und'][0] = $imgthumb_arr;
+  $node->field_swagger_json['und'][0] = $file_arr;
+  // 'node' is default,
+  // Other possible values are "user" and  "taxonomy_term"
+  if ($url_alias != '') {
+    $node->path['alias']    = trim($url_alias);
+    $node->path['pathauto'] = FALSE;
+  }
+  $query = db_select('node', 'n');
+  $query->join('field_data_field_api_version', 'fap', 'fap.entity_id = n.nid');
+  $query->condition('n.type', 'api_landing');
+  $query->condition('n.title', $apiName);
+  $query->orderBy('n.nid', 'DESC');
+  $query->fields('n', array( 'nid', 'vid', 'title', 'type' ));
+  $query->fields('fap', array(
+    'entity_id',
+    'field_api_version_value',
+    'revision_id'
+  ));
+  $result = $query->execute()->fetchObject();
+//cloudsmartz_generate_error($result->field_api_version_value);
+  if ($result->field_api_version_value == $_POST['apiVersion']) {
+    $node->field_check_latest_version['und'][0]['value'] = 'yes';
+  }
+  else {
+    $node->field_check_latest_version['und'][0]['value'] = 'no';
+  }
+  $node = node_submit($node); // Prepare node for saving
+  node_save($node);
+
+  echo json_encode(array(
+    'status' => 'success',
+	'nid' => $node->nid,
+    'url'    => $base_url . '/content/' . drupal_html_class(drupal_clean_css_identifier($apiName . '-' . $apiVersion))
+  ));
+  die;
+}
