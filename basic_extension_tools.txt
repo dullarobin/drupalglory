@@ -1,0 +1,6 @@
+Snagit -- snap sot addone for chrome
+Beyond compare- for comparing files or folder
+https://www.youtube.com/watch?v=_uQrJ0TkZlc -- 5hour 03min 40sec --- Python beginers
+=================
+20-06-2019
+https://www.youtube.com/watch?v=-oQvMHpKkms -- Django further
