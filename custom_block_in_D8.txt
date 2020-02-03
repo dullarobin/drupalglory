@@ -1,0 +1,89 @@
+Programmatically Creating Block
+This method requires a little more understanding of the way Drupal works, however, once you get the hang of it, it gets pretty easy.
+
+ 
+
+Create a module
+In Drupal 8, it is necessary to create an info.yml file that contains the metadata for every custom module, theme or plugin you create. Similarly, for our custom block, we will need to create an info.yml file in the ‘modules/custom’ directory. Note that if the custom folder isn’t already created, you will need to create it. For creating a custom block, we will need to make a custom module.
+
+Now create an ‘info.yml’ file such as ‘custom_block_example.info.yml’. Inside this file enter following:
+
+name: Custom Block Example
+type: module
+description: Define a custom block.
+core: 8.x
+package: Custom
+dependencies:
+  - block
+
+You can now go to your Drupal dashboard and enable the custom module we have just created.
+
+ 
+
+Create Class
+Now, in order to define the logic of the block, we need to create a class which will be placed under the modules/custom/custom_block_example/src/Plugin/Block directory. 
+
+The class file should contain annotation as well. The annotation allows us to identify the block. Apart from the annotation, this class will contain 4 methods:
+
+build() - Returns a basic markup by rendering a renderable array.
+blockAccess() - Defines a custom user access logic.
+blockForm() - Defines a custom block configuration form using the Form API.
+blockSubmit() - Used to save a configuration, defined on the blockForm() method.
+Now, this is what the class file should contain in the end:
+
+ 
+
+<?php
+
+namespace Drupal\my_block_example\Plugin\Block;
+
+use Drupal\Core\Access\AccessResult;
+use Drupal\Core\Block\BlockBase;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Session\AccountInterface;
+
+/**
+ * Provides a block with a simple text.
+ *
+ * @Block(
+ *   id = "my_block_example_block",
+ *   admin_label = @Translation("My block"),
+ * )
+ */
+class MyBlock extends BlockBase {
+  /**
+   * {@inheritdoc}
+   */
+  public function build() {
+    return [
+      '#markup' => $this->t('This is a simple block!'),
+    ];
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function blockAccess(AccountInterface $account) {
+    return AccessResult::allowedIfHasPermission($account, 'access content');
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function blockForm($form, FormStateInterface $form_state) {
+    $config = $this->getConfiguration();
+
+    return $form;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function blockSubmit($form, FormStateInterface $form_state) {
+    $this->configuration['my_block_settings'] = $form_state->getValue('my_block_settings');
+  }
+}
+
+ 
+
+Now, go back to your site, and you should be able to see the block you have just created. Simply assign the block to a region of your choice and it should become visible.
