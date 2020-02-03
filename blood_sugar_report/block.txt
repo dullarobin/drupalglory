@@ -1,0 +1,61 @@
+uuid: b1b72156-d654-4074-8892-2985a14ab514
+langcode: en
+status: true
+dependencies:
+  config:
+    - views.view.blood_sugar_report
+  module:
+    - system
+    - views
+  theme:
+    - bartik
+id: views_block__blood_sugar_report_block_1
+theme: bartik
+region: content
+weight: -2
+provider: null
+plugin: 'views_block:blood_sugar_report-block_1'
+settings:
+  id: 'views_block:blood_sugar_report-block_1'
+  label: ''
+  provider: views
+  label_display: visible
+  views_label: ''
+  items_per_page: none
+visibility:
+  request_path:
+    id: request_path
+    pages: /myspace
+    negate: false
+    context_mapping: {  }
+==========================================
+uuid: 982115c7-1bdc-4f8b-96b2-ae868c8b0de3
+langcode: en
+status: true
+dependencies:
+  config:
+    - views.view.upload_prescription
+  module:
+    - system
+    - views
+  theme:
+    - bartik
+id: views_block__upload_prescription_block_1
+theme: bartik
+region: content
+weight: 0
+provider: null
+plugin: 'views_block:upload_prescription-block_1'
+settings:
+  id: 'views_block:upload_prescription-block_1'
+  label: ''
+  provider: views
+  label_display: visible
+  views_label: ''
+  items_per_page: none
+visibility:
+  request_path:
+    id: request_path
+    pages: /myspace
+    negate: false
+    context_mapping: {  }

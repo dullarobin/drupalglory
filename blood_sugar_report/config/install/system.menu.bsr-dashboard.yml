@@ -1,0 +1,7 @@
+langcode: en
+status: true
+dependencies: {  }
+id: bsr-dashboard
+label: 'BSR Dashboard'
+description: 'BSR Reports'
+locked: false

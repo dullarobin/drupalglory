@@ -1,0 +1,128 @@
+<?php
+use Drupal\Core\Database\Database;
+
+/**
+ * Impliments hook__schema
+ */
+function blood_sugar_report_schema() {
+$schema = array();
+
+  $schema['blood_sugar_report'] = array(
+    'description' => 'Stores value in custom table blood_sugar_report',
+    'fields' => array(
+      'pid' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+        'description' => 'Primary Key: Unique id for user',
+      ),
+      'bs_level' => array(
+        'type' => 'int',
+        'length' => 10,
+        'not null' => TRUE,
+        'description' => 'Blood sugar of a person.',
+      ),
+      'name' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'Store name of a person',
+      ),
+       'email' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'Store email of a person',
+      ),
+      'date_time' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'Date time blood sugar value entry',
+      ),
+    ),
+    'primary key' => array('pid'),
+  );
+ 
+  $schema['prescription_report'] = array(
+    'description' => 'Stores value in custom table prescription_report',
+    'fields' => array(
+      'prid' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+        'description' => 'Primary Key: Unique id',
+      ),
+      'file_name' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'Store file name',
+      ),
+      'file_des' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'Store file name',
+      ),
+       'file_size' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'Store file size',
+      ),
+	   'email' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'Store email of a person',
+      ),
+      'date_time' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'Date time blood sugar value entry',
+      ),
+    ),
+    'primary key' => array('prid'),
+  );
+
+  return $schema;
+}
+
+/**
+ * Impliments hook_update_N
+ */
+function blood_sugar_report_update_8005() {
+$spec = array(
+	'type' => 'int',
+	'description' => "User Id",
+	'length' => 20,
+	'not null' => FALSE,
+);
+$schema = Database::getConnection()
+	->schema();
+$schema
+	->addField('blood_sugar_report', 'uid', $spec);
+	
+/******* Fields for table Prescription Report**************/
+$spec = array(
+	'type' => 'int',
+	'description' => "Primary key of blood sugar report",
+	'length' => 20,
+	'not null' => FALSE,
+);
+$schema = Database::getConnection()
+	->schema();
+$schema
+	->addField('prescription_report', 'PID', $spec);
+
+$spec = array(
+	'type' => 'int',
+	'description' => "User ID",
+	'length' => 20,
+	'not null' => FALSE,
+);
+$schema = Database::getConnection()
+	->schema();
+$schema
+	->addField('prescription_report', 'UID', $spec);
+}

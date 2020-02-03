@@ -1,0 +1,8 @@
+langcode: en
+status: true
+dependencies: {  }
+id: admin_bsr
+label: 'Admin BSR'
+weight: 4
+is_admin: null
+permissions: {  }

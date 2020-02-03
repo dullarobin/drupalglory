@@ -1,0 +1,23 @@
+bsr.myspaceform:
+ path: '/myspace'
+ defaults:
+   _title: 'User Dashboard'
+   _form: '\Drupal\blood_sugar_report\Form\BloodSugarForm'
+ requirements:
+   _role: "blood_sugar_users + administrator"
+
+bsr.prescriptionform:
+ path: '/myspace/prescription'
+ defaults:
+   _title: 'Upload Prescription'
+   _form: '\Drupal\blood_sugar_report\Form\PrescriptionForm'
+ requirements:
+   _role: 'blood_sugar_users + administrator'
+
+blood_sugar_report.admin_settings:
+  path: '/admin/config/bsr'
+  defaults:
+    _form: '\Drupal\blood_sugar_report\Form\AdminConfigurationForm'
+    _title: 'Admin BSR configuration Setting'
+  requirements:
+    _permission: 'administer site configuration'
