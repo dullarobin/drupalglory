@@ -1,0 +1,5 @@
+name: NeoSoft Curd Operation
+type: module
+description: This dispaly information of the users.
+core: 8.x
+package: Custom

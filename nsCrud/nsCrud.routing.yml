@@ -1,0 +1,27 @@
+nsCrud.data_form:
+  path: '/nsCrud/form/data'
+  defaults:
+    _form: '\Drupal\nsCrud\Form\DataForm'
+    _title: 'DataForm'
+  requirements:
+    _access: 'TRUE'
+  
+
+nsCrud.display_table_controller_display:
+  path: '/data/table'
+  defaults:
+    _controller: '\Drupal\nsCrud\Controller\DisplayTableController::display'
+    _title: 'Display'
+  requirements:
+    _permission: 'access content'
+
+
+
+nsCrud.delete_form:
+  path: '/data/form/delete/{cid}'
+  defaults:
+    _form: '\Drupal\nsCrud\Form\DeleteForm'
+    _title: 'DeleteForm'
+  requirements:
+    _access: 'TRUE'
+  
