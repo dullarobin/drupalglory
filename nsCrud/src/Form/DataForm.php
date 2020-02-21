@@ -63,9 +63,8 @@ class DataForm extends FormBase {
       );
 
     $form['user_dob'] = array (
-      '#type' => 'textfield',
+      '#type' => 'date',
       '#title' => t('DOB'),
-	  '#placeholder' =>t('dd/mm/yyyy'),
       '#default_value' => (isset($record['dob']) && $_GET['num']) ? $record['dob']:'',
        );
 
