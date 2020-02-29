@@ -1,0 +1,6 @@
+name: Demo REST API
+type: module
+description: 'Creating first Rest API.'
+package: Custom
+version: 8.x
+core: 8.x
