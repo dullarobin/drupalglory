@@ -1,4 +1,3 @@
-
 ----------------Phase1:: USER FLOW-----------------------------
 Step1: Login with superadmin user and Intall the module Blood Sugar Record
 Step2: Run update.php, In case there is no update. Please once go to the install file and change the hook_update_n
