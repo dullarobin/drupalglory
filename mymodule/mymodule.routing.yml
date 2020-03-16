@@ -1,0 +1,7 @@
+mymodule.match_routh:
+  path: '/page_json/{api_key}/{node_id}'
+  defaults:
+    _controller: '\Drupal\mymodule\Controller\MatchApiController::foo'
+  requirements:
+    _permission: 'access content'
+  

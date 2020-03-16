@@ -1,0 +1,6 @@
+name: Site Information Alter
+description: A Custom module to alter the site information form and adding a new filed of name siteapikey.
+core: 8.x
+package: Custom
+type: module
+
