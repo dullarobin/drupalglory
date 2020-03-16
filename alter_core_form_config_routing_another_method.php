@@ -1,4 +1,7 @@
 <?php
+/**
+* Impliments hook_form_Id_alter()
+*/
 function modulename_form_system_site_information_settings_alter(&$form, $form_state, $form_id)
 {
 
