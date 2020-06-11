@@ -153,7 +153,7 @@ function user_registration_otp_form_submit(&$form, \Drupal\Core\Form\FormStateIn
 	 $result = $mailManager->mail($module, $to, $langcode, $params, NULL, $send);
 	 
 	 if ($result['result'] !== true) {
-	   drupal_set_message(t('There was a problem sending your message and it was not sent.'), 'error');
+	   drupal_set_message(t('There is a problem with sending mail and it not sent.'), 'error');
 	   return;
 	 }
 	 else {
