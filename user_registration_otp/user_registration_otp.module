@@ -1,0 +1,178 @@
+<?php
+
+/**
+ * @file
+ * Contains user_registration_otp.module.
+ */
+
+use Drupal\Core\Routing\RouteMatchInterface;
+use Symfony\Component\HttpFoundation\RedirectResponse;
+use Drupal\Core\Url;
+use Drupal\Core\Database\Database;
+use Symfony\Component\HttpFoundation\Session;
+use Drupal\user\PrivateTempStoreFactory;
+
+/**
+ * Implements hook_help().
+ */
+function user_registration_otp_help($route_name, RouteMatchInterface $route_match) {
+  switch ($route_name) {
+    // Main module help for the user_registration_otp module.
+    case 'help.page.user_registration_otp':
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('OTP on user registration') . '</p>';
+      return $output;
+
+    default:
+  }
+}
+
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ *
+ * {@inheritdoc}
+ */
+function user_registration_otp_form_user_register_form_alter(&$form, \Drupal\Core\Form\FormStateInterface $form_state) {
+  	$tempstore = \Drupal::service('user.private_tempstore')->get('user_registration_otp'); 
+	$field_readonly = $tempstore->get('user_otp_mail');
+	if(isset($field_readonly)) {
+		$form['account']['mail']['#attributes'] = array('readonly' => 'readonly');
+	}
+  $form['account']['name']['#required'] = FALSE;
+  $form['account']['name']['#access'] = FALSE;
+  $form['account']['pass']['#required'] = FALSE;
+  $form['account']['pass']['#access'] = FALSE;
+  $form['account']['pass2']['#required'] = FALSE;
+  $form['account']['pass2']['#access'] = FALSE;
+  $form['account']['mail']['#required'] = TRUE;
+  array_unshift($form['#validate'], 'user_registration_otp_prepare_form_user_values');
+  array_unshift($form['actions']['submit']['#submit'], 'user_registration_otp_form_submit');
+  $form['#validate'][] = 'user_registration_otp_form_user_post_validate';
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ *
+ * {@inheritdoc}
+ */
+function user_registration_otp_form_user_form_alter(&$form, \Drupal\Core\Form\FormStateInterface $form_state) {
+  $form['account']['name']['#required'] = FALSE;
+  $form['account']['name']['#access'] = FALSE;
+  $form['account']['mail']['#required'] = TRUE;
+  array_unshift($form['#validate'], 'user_registration_otp_prepare_form_user_values');
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ *
+ * {@inheritdoc}
+ */
+function user_registration_otp_form_user_login_form_alter(&$form, \Drupal\Core\Form\FormStateInterface $form_state) {
+  $form['name']['#title'] = \Drupal::translation()->translate('Email address');
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ *
+ * {@inheritdoc}
+ */
+function user_registration_otp_form_user_pass_alter(&$form, \Drupal\Core\Form\FormStateInterface $form_state) {
+  $form['name']['#title'] = \Drupal::translation()->translate('Email address');
+}
+
+/**
+ * Copy the 'mail' field to the 'name' field before form validation.
+ *
+ * @param array $form
+ * @param \Drupal\Core\Form\FormStateInterface $form_state
+ */
+function user_registration_otp_prepare_form_user_values(&$form, \Drupal\Core\Form\FormStateInterface $form_state) {
+  $email = $form_state->getValue('mail');
+  $form_state->setValue('name', $email);
+}
+
+/**
+ * Remove the errors related to 'name' field.
+ * @param $form
+ * @param \Drupal\Core\Form\FormStateInterface $form_state
+ */
+function user_registration_otp_form_user_post_validate(&$form, \Drupal\Core\Form\FormStateInterface $form_state) {
+  $errors = $form_state->getErrors();
+  unset($errors['name']);
+  $form_state->clearErrors();
+  foreach($errors as $field => $value) {
+    $form_state->setErrorByName($field, $value);
+  }
+}
+
+/**
+ * submit handler regarding user registration form.
+ * @param $form
+ * @param \Drupal\Core\Form\FormStateInterface $form_state
+ */
+function user_registration_otp_form_submit(&$form, \Drupal\Core\Form\FormStateInterface $form_state) {
+	$database = \Drupal::database();
+	$conn = Database::getConnection();
+	$mail = $form_state->getValue('mail');
+	$tempstore = \Drupal::service('user.private_tempstore')->get('user_registration_otp');
+	$tempstore->set('user_otp_mail', $mail); 
+
+	for ($otp = mt_rand(1, 9), $i = 1; $i < 10; $i++) {
+		$otp .= mt_rand(0, 9);
+	}
+	$cuurent_date_time = date('Y-m-d h:i:s a', time());
+	
+	$query = $database->select('user_regis_otp', 'uro');
+	$query->condition('uro.mail', $mail, '=');
+	$query->fields('uro', ['mail']);
+	$result = $query->execute();
+	$otp_mail =  $result->fetchField();
+	if(isset($mail) && $otp_mail === $mail) {
+		drupal_set_message(t('User already registered.'), 'error');
+	}
+	else {
+		$conn->insert('user_regis_otp')->fields(
+		  array(
+			'mail' => $mail,
+			'otp' => $otp,
+			'date_time' => $cuurent_date_time,
+		  )
+		)->execute();
+	}
+	
+	/** Mail manager **/
+	$mailManager = \Drupal::service('plugin.manager.mail');
+	 $module = ‘user_registration_otp’;
+	 $to = $mail;
+	 $params['message'] = t('Please check the below OTP.');
+	 $params['otp'] = $otp;
+	 $langcode = \Drupal::currentUser()->getPreferredLangcode();
+	 $send = true;
+	 $result = $mailManager->mail($module, $to, $langcode, $params, NULL, $send);
+	 
+	 if ($result['result'] !== true) {
+	   drupal_set_message(t('There was a problem sending your message and it was not sent.'), 'error');
+	   return;
+	 }
+	 else {
+	   $response = new RedirectResponse("/user_registration_otp/form/otp");
+	   $response->send();
+	   return;
+	 }
+	
+}
+
+/**
+ * Implements hook_mail_alter().
+ *
+ * Don't send default registration mail.
+ */
+function user_registration_otp_mail_alter(&$message) {
+  if ($message['id'] == 'user_register_no_approval_required' && $message['key'] == 'register_no_approval_required') {
+      $message['send'] = FALSE;
+      return;
+  }
+}
+

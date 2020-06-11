@@ -1,0 +1,7 @@
+user_registration_otp.user_regis_otp:
+  path: '/user_registration_otp/form/otp'
+  defaults:
+    _form: '\Drupal\user_registration_otp\Form\OtpForm'
+    _title: 'OtpForm'
+  requirements:
+    _access: 'TRUE'

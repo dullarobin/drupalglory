@@ -1,0 +1,7 @@
+name: 'User Registration OTP'
+type: module
+description: 'OTP on user registration'
+core: 8.x
+package: 'Custom'
+dependencies:
+  - user

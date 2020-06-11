@@ -1,0 +1,41 @@
+<?php
+use Drupal\Core\Database\Database;
+
+/**
+ * Impliments hook_schema
+ */
+function user_registration_otp_schema() {
+$schema = array();
+
+  $schema['user_regis_otp'] = array(
+    'description' => 'Stores value in custom table user_regis_otp',
+    'fields' => array(
+      'id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+        'description' => 'Primary Key: Unique id',
+      ),
+      'mail' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'Store email of a user',
+      ),
+       'otp' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'Store otp of a user',
+      ),
+      'date_time' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'description' => 'Date time on which time otp generated',
+      ),
+    ),
+    'primary key' => array('id'),
+  );
+  
+	return $schema;
+}
