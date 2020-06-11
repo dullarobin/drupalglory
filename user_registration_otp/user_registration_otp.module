@@ -35,11 +35,11 @@ function user_registration_otp_help($route_name, RouteMatchInterface $route_matc
  * {@inheritdoc}
  */
 function user_registration_otp_form_user_register_form_alter(&$form, \Drupal\Core\Form\FormStateInterface $form_state) {
-  	$tempstore = \Drupal::service('user.private_tempstore')->get('user_registration_otp'); 
+  	/*$tempstore = \Drupal::service('user.private_tempstore')->get('user_registration_otp'); 
 	$field_readonly = $tempstore->get('user_otp_mail');
 	if(isset($field_readonly)) {
 		$form['account']['mail']['#attributes'] = array('readonly' => 'readonly');
-	}
+	}*/
   $form['account']['name']['#required'] = FALSE;
   $form['account']['name']['#access'] = FALSE;
   $form['account']['pass']['#required'] = FALSE;
@@ -133,35 +133,33 @@ function user_registration_otp_form_submit(&$form, \Drupal\Core\Form\FormStateIn
 		drupal_set_message(t('User already registered.'), 'error');
 	}
 	else {
-		$conn->insert('user_regis_otp')->fields(
-		  array(
-			'mail' => $mail,
-			'otp' => $otp,
-			'date_time' => $cuurent_date_time,
-		  )
-		)->execute();
-	}
-	
-	/** Mail manager **/
-	$mailManager = \Drupal::service('plugin.manager.mail');
-	 $module = ‘user_registration_otp’;
-	 $to = $mail;
-	 $params['message'] = t('Please check the below OTP.');
-	 $params['otp'] = $otp;
-	 $langcode = \Drupal::currentUser()->getPreferredLangcode();
-	 $send = true;
-	 $result = $mailManager->mail($module, $to, $langcode, $params, NULL, $send);
-	 
-	 if ($result['result'] !== true) {
-	   drupal_set_message(t('There is a problem with sending mail and it not sent.'), 'error');
-	   return;
-	 }
-	 else {
-	   $response = new RedirectResponse("/user_registration_otp/form/otp");
-	   $response->send();
-	   return;
-	 }
-	
+		/** Mail manager **/
+		 $mailManager = \Drupal::service('plugin.manager.mail');
+		 $module = ‘user_registration_otp’;
+		 $to = $mail;
+		 $params['message'] = t('Please check the below OTP.');
+		 $params['otp'] = $otp;
+		 $langcode = \Drupal::currentUser()->getPreferredLangcode();
+		 $send = true;
+		 $result = $mailManager->mail($module, $to, $langcode, $params, NULL, $send);
+		 
+		 if ($result['result'] !== true) {
+		   drupal_set_message(t('There is a problem with sending mail and it not sent.'), 'error');
+		   return;
+		 }
+		 else {
+		    $conn->insert('user_regis_otp')->fields(
+			  array(
+				'mail' => $mail,
+				'otp' => $otp,
+				'date_time' => $cuurent_date_time,
+			  )
+			)->execute();
+		   $response = new RedirectResponse("/user_registration_otp/form/otp");
+		   $response->send();
+		   return;
+		 }
+	}	
 }
 
 /**
